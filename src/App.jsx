@@ -8,7 +8,8 @@ import './App.css'
 function App() {
   const isProduction = import.meta.env.PROD
   // Используем BASE_URL из Vite конфига для правильного роутинга
-  const basename = import.meta.env.BASE_URL
+  // Убираем завершающий слеш, если он есть (React Router не требует его)
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
 
   return (
     <BrowserRouter basename={basename}>
