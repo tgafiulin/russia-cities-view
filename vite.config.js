@@ -2,10 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  // Для GitHub Pages: если репозиторий не является root (username.github.io),
-  // раскомментируйте следующую строку и укажите имя репозитория:
-  // base: '/cities/',
-  base: '/',
+export default defineConfig(({ mode }) => {
+  // В dev режиме base = '/', в production (build) = '/russia-cities-view/'
+  const base = mode === 'development' ? '/' : '/russia-cities-view/'
+  
+  return {
+    plugins: [react()],
+    base: base,
+  }
 })
