@@ -7,9 +7,11 @@ import './App.css'
 
 function App() {
   const isProduction = import.meta.env.PROD
+  // Используем BASE_URL из Vite конфига для правильного роутинга
+  const basename = import.meta.env.BASE_URL
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename}>
       <Navigation />
       <Routes>
         <Route path="/" element={<Home />} />
