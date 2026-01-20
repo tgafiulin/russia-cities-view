@@ -1,30 +1,15 @@
-import { useMemo, useState, useEffect } from 'react'
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import citiesData from '../../russia-cities.json'
 import '../Map.css'
 
-// Фикс для иконок в React Leaflet
-import icon from 'leaflet/dist/images/marker-icon.png'
-import iconShadow from 'leaflet/dist/images/marker-shadow.png'
-
-let DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  tooltipAnchor: [16, -28],
-  shadowSize: [41, 41]
-})
-
-L.Marker.prototype.options.icon = DefaultIcon
-
 function Map() {
+  const mapRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+  const clustererRef = useRef(null)
   const [visitedCityIds, setVisitedCityIds] = useState(() => 
     JSON.parse(localStorage.getItem('visitedCities') || '[]')
   )
+  const [ymapsLoaded, setYmapsLoaded] = useState(false)
 
   // Обновляем при изменении localStorage (для синхронизации между вкладками и страницами)
   useEffect(() => {
@@ -38,6 +23,21 @@ function Map() {
     return () => {
       window.removeEventListener('storage', handleStorageChange)
       window.removeEventListener('visitedCitiesUpdated', handleStorageChange)
+    }
+  }, [])
+
+  // Проверяем загрузку Яндекс.Карт
+  useEffect(() => {
+    if (window.ymaps) {
+      setYmapsLoaded(true)
+    } else {
+      const checkYmaps = setInterval(() => {
+        if (window.ymaps) {
+          setYmapsLoaded(true)
+          clearInterval(checkYmaps)
+        }
+      }, 100)
+      return () => clearInterval(checkYmaps)
     }
   }, [])
   
@@ -56,6 +56,104 @@ function Map() {
     [visitedCities]
   )
 
+
+  // Инициализация карты (только один раз)
+  useEffect(() => {
+    if (!ymapsLoaded || !mapRef.current || mapInstanceRef.current) return
+
+    window.ymaps.ready(() => {
+      if (mapInstanceRef.current) return
+
+      const initialCenter = [55.7558, 37.6173] // Москва по умолчанию
+
+      const map = new window.ymaps.Map(mapRef.current, {
+        center: initialCenter,
+        zoom: 5,
+        controls: ['zoomControl', 'fullscreenControl', 'typeSelector', 'geolocationControl']
+      })
+
+      mapInstanceRef.current = map
+
+      // Создаем кластеризатор
+      const clusterer = new window.ymaps.Clusterer({
+        preset: 'islands#invertedBlueClusterIcons',
+        groupByCoordinates: false,
+        clusterDisableClickZoom: true,
+        clusterHideIconOnBalloonOpen: true,
+        geoObjectHideIconOnBalloonOpen: false,
+        clusterBalloonContentLayout: 'cluster#balloonCarousel',
+        clusterBalloonItemContentLayout: 'cluster#balloonCarouselItem',
+        clusterBalloonPanelMaxMapArea: 0,
+        clusterBalloonContentLayoutWidth: 300,
+        clusterBalloonContentLayoutHeight: 200,
+        clusterBalloonPagerSize: 5,
+        clusterBalloonPagerType: 'marker',
+        clusterBalloonPagerVisible: true,
+      })
+
+      clustererRef.current = clusterer
+      map.geoObjects.add(clusterer)
+    })
+
+    return () => {
+      if (clustererRef.current) {
+        clustererRef.current = null
+      }
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.destroy()
+        mapInstanceRef.current = null
+      }
+    }
+  }, [ymapsLoaded])
+
+  // Обновление маркеров и центра карты при изменении посещенных городов
+  useEffect(() => {
+    // Пропускаем обновление, если карта еще не инициализирована (маркеры добавятся при инициализации)
+    if (!ymapsLoaded || !mapInstanceRef.current || !clustererRef.current || !window.ymaps) return
+
+    window.ymaps.ready(() => {
+      if (!mapInstanceRef.current || !clustererRef.current) return
+
+      const clusterer = clustererRef.current
+
+      // Очищаем все маркеры из кластеризатора
+      clusterer.removeAll()
+
+      // Создаем массив маркеров для кластеризатора
+      const placemarks = visitedCities.map(city => {
+        const balloonContent = `
+          <div style="padding: 5px;">
+            <strong>${city.name}</strong><br />
+            ${city.region?.name ? `<span>${city.region.name}</span><br />` : ''}
+            ${city.population ? `<span style="font-size: 0.9em; color: #666;">Население: ${new Intl.NumberFormat('ru-RU').format(city.population)}</span>` : ''}
+          </div>
+        `
+
+        return new window.ymaps.Placemark(
+          [city.coords.lat, city.coords.lon],
+          {
+            balloonContent: balloonContent,
+            hintContent: city.name,
+          },
+          {
+            preset: 'islands#blueCircleDotIcon',
+            openHintOnHover: true,
+          }
+        )
+      })
+
+      // Добавляем все маркеры в кластеризатор
+      if (placemarks.length > 0) {
+        clusterer.add(placemarks)
+      }
+
+      // Обновляем центр карты, если есть посещенные города
+      if (visitedCities.length > 0 && mapInstanceRef.current) {
+        mapInstanceRef.current.setCenter([visitedCities[0].coords.lat, visitedCities[0].coords.lon])
+      }
+    })
+  }, [visitedCities, ymapsLoaded])
+
   return (
     <div className="map-page">
       <div className="map-header">
@@ -65,36 +163,19 @@ function Map() {
         </div>
       </div>
       <div className="map-container">
-        <MapContainer
-          center={center}
-          zoom={5}
-          style={{ height: '100%', width: '100%' }}
-          scrollWheelZoom={true}
-        >
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          />
-          {visitedCities.map(city => (
-            <Marker
-              key={city.id}
-              position={[city.coords.lat, city.coords.lon]}
-            >
-              <Popup>
-                <strong>{city.name}</strong><br />
-                {city.region?.name && <span>{city.region.name}</span>}
-                {city.population && (
-                  <>
-                    <br />
-                    <span style={{ fontSize: '0.9em', color: '#666' }}>
-                      Население: {new Intl.NumberFormat('ru-RU').format(city.population)}
-                    </span>
-                  </>
-                )}
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
+        {!ymapsLoaded && (
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            height: '100%',
+            fontSize: '1.1rem',
+            color: '#666'
+          }}>
+            Загрузка карты...
+          </div>
+        )}
+        <div ref={mapRef} style={{ width: '100%', height: '100%', display: ymapsLoaded ? 'block' : 'none' }}></div>
       </div>
     </div>
   )
